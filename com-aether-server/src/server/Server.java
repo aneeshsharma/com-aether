@@ -9,7 +9,7 @@ public class Server {
      */
     public static void main(String[] args){
         ServerSocket server;
-        System.out.println("Startin chat server...");
+        System.out.println("Starting chat server...");
         try {
             server = new ServerSocket(7200);
         } catch (IOException e) {

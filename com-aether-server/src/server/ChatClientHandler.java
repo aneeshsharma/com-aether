@@ -58,8 +58,11 @@ public class ChatClientHandler implements Runnable{
             String request = null;
             try {
                 request = inStream.readUTF();
+            } catch (EOFException eof) {
+                System.out.println("Client Disconnected!");
+                break;
             } catch (IOException e) {
-                e.printStackTrace();
+                System.out.println("An IO Exception Occurred!");
                 break;
             }
 
