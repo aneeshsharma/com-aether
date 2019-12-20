@@ -2,9 +2,17 @@ package server;
 
 import java.net.*;
 import java.io.*;
-import java.security.spec.ECField;
+import java.security.InvalidKeyException;
+import java.security.KeyPairGenerator;
+import java.security.NoSuchAlgorithmException;
 import java.sql.*;
-import java.util.*;
+import java.util.Base64;
+
+import aether.security.*;
+
+import javax.crypto.BadPaddingException;
+import javax.crypto.IllegalBlockSizeException;
+import javax.crypto.NoSuchPaddingException;
 
 public class ChatClientHandler implements Runnable{
     private Socket handle;
@@ -37,6 +45,52 @@ public class ChatClientHandler implements Runnable{
                 System.out.println("Unable to close connection!");
             }
             return;
+        }
+
+        System.out.println("Initializing RSA...");
+
+        RSAKeyPairGenerator keygen = null;
+
+        try {
+            keygen = new RSAKeyPairGenerator();
+        } catch (NoSuchAlgorithmException e) {
+            System.out.println("RSA Algorithm not found!\nSecure Connection cannot be established");
+            keygen = null;
+        }
+
+        System.out.println("Public key generated : " + keygen.getPublicKeyAsString());
+
+        if (keygen == null) {
+            try {
+                outStream.writeUTF("Server Error : Secure Connection cannot be established");
+                outStream.flush();
+            } catch (IOException e) {
+                System.out.println("Couldn't contact client. Exiting...");
+            }
+
+            try {
+                inStream.close();
+                outStream.close();
+                handle.close();
+            } catch (IOException e) {
+                System.out.println("Unable to close socket and streams!");
+            }
+
+            System.out.println("Keygen null. Exiting...");
+
+            return;
+        }
+
+        try {
+            outStream.writeUTF(keygen.getPublicKeyAsString());
+            outStream.flush();
+            String cryptData = inStream.readUTF();
+            System.out.println("Encrypted data received : " + cryptData);
+            System.out.println("Decrypted data : " + EncryptUtil.decrypt(cryptData, keygen.getPrivateKey()));
+        } catch (IOException e) {
+            System.out.println("Unable to contact client!!");
+        } catch (NoSuchAlgorithmException | InvalidKeyException | NoSuchPaddingException | BadPaddingException | IllegalBlockSizeException e) {
+            e.printStackTrace();
         }
 
         dbConn = null;
