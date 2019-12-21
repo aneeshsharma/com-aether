@@ -4,26 +4,27 @@ import java.io.*;
 import java.net.*;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
+import java.security.SecureRandom;
 import java.util.Base64;
 
-import aether.security.EncryptUtil;
-
-import aether.security.RSAKeyPairGenerator;
+import aether.security.AESUtil;
+import aether.security.RSAUtil;
 
 import javax.crypto.BadPaddingException;
 import javax.crypto.IllegalBlockSizeException;
 import javax.crypto.NoSuchPaddingException;
 
 public class ChatClient {
+    private static String secretKey;
+    private static String ip = "localhost";
+
+    private static DataOutputStream outStream;
+    private static DataInputStream inStream;
 
     public static void main(String[] args) {
         Socket sock;
-        DataOutputStream outStream;
-        DataInputStream inStream;
 
         BufferedReader stdin = new BufferedReader(new InputStreamReader(System.in));
-
-        String ip = "localhost";
 
         try {
             System.out.print("Server address (leave blank to use default): ");
@@ -47,9 +48,8 @@ public class ChatClient {
 
         try {
             String publicKey = inStream.readUTF();
-            System.out.println("Received key : " + publicKey);
-            String data = "Crypto Test : this is a test message for testing out the RSA encryption algorithm";
-            String cryptData = EncryptUtil.encryptToString(data, publicKey);
+            secretKey = AESUtil.generateKey();
+            String cryptData = RSAUtil.encryptToString(secretKey, publicKey);
             outStream.writeUTF(cryptData);
             outStream.flush();
         } catch (IOException e) {
@@ -74,9 +74,8 @@ public class ChatClient {
                 break;
 
             try {
-                outStream.writeUTF(input);
-                outStream.flush();
-                String str = inStream.readUTF();
+                sendData(input);
+                String str = receiveData();
                 System.out.println("Message Received : " + str);
             }
             catch (IOException e){
@@ -92,5 +91,17 @@ public class ChatClient {
         } catch (IOException e){
             System.out.println("Error closing connection!");
         }
+    }
+
+    private static void sendData(String data) throws IOException {
+        String encryptedData = AESUtil.encrypt(data, secretKey);
+        outStream.writeUTF(encryptedData);
+        outStream.flush();
+    }
+
+    private static String receiveData() throws IOException {
+        String encryptedData = inStream.readUTF();
+        String decryptedData = AESUtil.decrypt(encryptedData, secretKey);
+        return decryptedData;
     }
 }

@@ -3,10 +3,8 @@ package server;
 import java.net.*;
 import java.io.*;
 import java.security.InvalidKeyException;
-import java.security.KeyPairGenerator;
 import java.security.NoSuchAlgorithmException;
 import java.sql.*;
-import java.util.Base64;
 
 import aether.security.*;
 
@@ -26,46 +24,49 @@ public class ChatClientHandler implements Runnable{
     private Connection dbConn;
     private Statement dbQuery;
 
+    private String secretKey;
+
+    private DataInputStream inStream;
+    private DataOutputStream outStream;
+
     public ChatClientHandler(Socket sock){
         handle = sock;
     }
 
     public void run(){
-        DataInputStream inStream;
-        DataOutputStream outStream;
         try {
             inStream = new DataInputStream(handle.getInputStream());
             outStream = new DataOutputStream(handle.getOutputStream());
         }
         catch (IOException e){
-            System.out.println("Error occurred accepting the given request!\n" + e);
+            log("Error occurred accepting the given request!\n" + e);
             try {
                 handle.close();
             } catch (IOException ex) {
-                System.out.println("Unable to close connection!");
+                log("Unable to close connection!");
             }
             return;
         }
 
-        System.out.println("Initializing RSA...");
+        log("Initializing RSA...");
 
         RSAKeyPairGenerator keygen = null;
 
         try {
             keygen = new RSAKeyPairGenerator();
         } catch (NoSuchAlgorithmException e) {
-            System.out.println("RSA Algorithm not found!\nSecure Connection cannot be established");
+            log("RSA Algorithm not found!\nSecure Connection cannot be established");
             keygen = null;
         }
 
-        System.out.println("Public key generated : " + keygen.getPublicKeyAsString());
+        log("Public key generated : " + keygen.getPublicKeyAsString());
 
         if (keygen == null) {
             try {
                 outStream.writeUTF("Server Error : Secure Connection cannot be established");
                 outStream.flush();
             } catch (IOException e) {
-                System.out.println("Couldn't contact client. Exiting...");
+                log("Couldn't contact client. Exiting...");
             }
 
             try {
@@ -73,10 +74,10 @@ public class ChatClientHandler implements Runnable{
                 outStream.close();
                 handle.close();
             } catch (IOException e) {
-                System.out.println("Unable to close socket and streams!");
+                log("Unable to close socket and streams!");
             }
 
-            System.out.println("Keygen null. Exiting...");
+            log("Keygen null. Exiting...");
 
             return;
         }
@@ -85,13 +86,14 @@ public class ChatClientHandler implements Runnable{
             outStream.writeUTF(keygen.getPublicKeyAsString());
             outStream.flush();
             String cryptData = inStream.readUTF();
-            System.out.println("Encrypted data received : " + cryptData);
-            System.out.println("Decrypted data : " + EncryptUtil.decrypt(cryptData, keygen.getPrivateKey()));
+            secretKey = RSAUtil.decrypt(cryptData, keygen.getPrivateKey());
         } catch (IOException e) {
             System.out.println("Unable to contact client!!");
         } catch (NoSuchAlgorithmException | InvalidKeyException | NoSuchPaddingException | BadPaddingException | IllegalBlockSizeException e) {
             e.printStackTrace();
         }
+
+        log("Secure Connection Established!");
 
         dbConn = null;
         dbQuery = null;
@@ -99,24 +101,25 @@ public class ChatClientHandler implements Runnable{
         try {
             Class.forName(JDBC_DRIVER);
 
-            System.out.println("Connecting to database");
+            log("Connecting to database");
             dbConn = DriverManager.getConnection(DB_URL, USER, PASS);
-
-            System.out.println("Creating a statement");
             dbQuery = dbConn.createStatement();
         } catch (Exception e) {
             e.printStackTrace();
         }
 
+        log("Database connected!");
+
         while (true) {
             String request = null;
             try {
-                request = inStream.readUTF();
+                request = receiveData();
+                log("Query Received : " + request);
             } catch (EOFException eof) {
-                System.out.println("Client Disconnected!");
+                log("Client Disconnected!");
                 break;
             } catch (IOException e) {
-                System.out.println("An IO Exception Occurred!");
+                log("An IO Exception Occurred!");
                 break;
             }
 
@@ -127,10 +130,9 @@ public class ChatClientHandler implements Runnable{
                 function = request.substring(0, request.indexOf(':'));
                 args = request.substring(request.indexOf(':') + 1);
             } catch (Exception e){
-                System.out.println("Invalid request format : " + request + "\n" + e);
+                log("Invalid request format : " + request + "\n" + e);
                 try {
-                    outStream.writeUTF("Invalid Query!");
-                    outStream.flush();
+                    sendData("Invalid Query");
                 } catch (IOException ioe) {
                     break;
                 }
@@ -145,15 +147,14 @@ public class ChatClientHandler implements Runnable{
                     result = send(args);
                     break;
                 default:
-                    System.out.println("Unknown function " + function + " | Skipped");
+                    log("Unknown function " + function + " | Skipped");
                     result = "Invalid Query!!";
             }
 
             try {
-                outStream.writeUTF(result);
-                outStream.flush();
+                sendData(result);
             } catch (IOException e) {
-                System.out.println("Unable to send result to client!");
+                log("Unable to send result to client!");
             }
         }
         try {
@@ -161,7 +162,7 @@ public class ChatClientHandler implements Runnable{
             outStream.close();
             handle.close();
         } catch (IOException e) {
-            System.out.println("Unable to close socket and streams!");
+            log("Unable to close socket and streams!");
         }
 
         try {
@@ -172,6 +173,21 @@ public class ChatClientHandler implements Runnable{
         } catch (SQLException e){
             e.printStackTrace();
         }
+    }
+
+    private String receiveData() throws IOException {
+        String encryptedData = inStream.readUTF();
+        return AESUtil.decrypt(encryptedData, secretKey);
+    }
+
+    private void sendData(String data) throws IOException {
+        String encryptedData = AESUtil.encrypt(data, secretKey);
+        outStream.writeUTF(encryptedData);
+        outStream.flush();
+    }
+
+    private void log(String msg) {
+        System.out.println(handle.getRemoteSocketAddress().toString() + "\t|\t" + msg);
     }
 
     private String search(String args){

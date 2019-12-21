@@ -5,7 +5,7 @@ import java.security.*;
 import java.security.spec.*;
 import java.util.Base64;
 
-public class EncryptUtil {
+public class RSAUtil {
     public static PublicKey getPublicKey(String base64Key) {
         PublicKey key = null;
         try {
