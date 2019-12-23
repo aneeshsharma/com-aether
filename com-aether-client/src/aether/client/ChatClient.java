@@ -38,6 +38,51 @@ public class ChatClient {
         // Encrypt the connection pipe
         establishSecureConnection();
 
+        String home = System.getProperty("user.home");
+
+        String dataDir = home + "/.aether-data/";
+
+        File credentialsFile = new File(dataDir + ".credentials");
+        BufferedReader credIn = null;
+        try {
+            InputStreamReader fileStream = new InputStreamReader(new FileInputStream(credentialsFile));
+            credIn = new BufferedReader(fileStream);
+        } catch (FileNotFoundException e) {
+            registerNewUser(dataDir);
+            try {
+                InputStreamReader fileStream = new InputStreamReader(new FileInputStream(credentialsFile));
+                credIn = new BufferedReader(fileStream);
+            } catch (FileNotFoundException e2) {
+                System.out.println("Resgistration failed!");
+                return;
+            }
+        }
+
+        // Make sure the file input stream isn't null
+        assert credIn != null;
+
+        String username = null, key=null;
+        try {
+            username = credIn.readLine();
+            key = credIn.readLine();
+        } catch (IOException e) {
+            System.out.println("Error fetching credentials!");
+            return;
+        }
+
+        String loginMsg = "Cannot authenticate user | Server error";
+
+        try {
+            sendData("login:" + username + "," + key);
+            loginMsg = receiveData();
+        } catch (IOException e) {
+            System.out.println("Couldn't contact server!");
+        }
+
+        System.out.println(loginMsg);
+
+        if (!loginMsg.equals("Successfully logged in!"))
+            return;
         while (true) {
             String input = null;
             try {
@@ -78,8 +123,7 @@ public class ChatClient {
 
     private static String receiveData() throws IOException {
         String encryptedData = inStream.readUTF();
-        String decryptedData = AESUtil.decrypt(encryptedData, secretKey);
-        return decryptedData;
+        return AESUtil.decrypt(encryptedData, secretKey);
     }
 
     private static void establishSecureConnection() {
@@ -112,6 +156,83 @@ public class ChatClient {
             sock.close();
         } catch (IOException e){
             System.out.println("Error closing connection!");
+        }
+    }
+
+    private static void registerNewUser(String dataDir) {
+        BufferedReader stdin = new BufferedReader(new InputStreamReader(System.in));
+        System.out.println("Register new user");
+        System.out.print("Username : ");
+        String username = null;
+        String usernameExists = "true";
+        while (usernameExists.equals("true")) {
+            try {
+                username = stdin.readLine();
+            } catch (IOException e) {
+                System.out.println("Error reading username");
+            }
+
+            try {
+                sendData("check_username:" + username);
+                usernameExists = receiveData();
+                if (usernameExists.equals("true")) {
+                    System.out.println("Username already exists please try a different username");
+                }
+            } catch (IOException e) {
+                System.out.println("Unable to contact server please try again later");
+            }
+        }
+
+        if (!usernameExists.equals("false")) {
+            System.out.println("Unexpected error occurred!");
+            return;
+        }
+
+        // Use the same key generator
+        String key = AESUtil.generateKey();
+
+        String fullName;
+        System.out.print("Full Name (optional): ");
+        try {
+            fullName = stdin.readLine();
+        } catch (IOException e) {
+            fullName = "";
+        }
+
+        String registrationStatus = "Failed";
+        try {
+            sendData("register:" + username + "," + key + "," + fullName);
+            registrationStatus = receiveData();
+        } catch (IOException e) {
+            System.out.println("Unable to contact server while registration!");
+        }
+
+        System.out.println(registrationStatus);
+        if (!registrationStatus.equals("Success")) {
+            return;
+        }
+
+        OutputStream fileOut = null;
+        File credentialFile;
+        try {
+            credentialFile = new File(dataDir + ".credentials");
+            fileOut = new FileOutputStream(credentialFile);
+        } catch (FileNotFoundException e) {
+            e.printStackTrace();
+        }
+
+        try {
+            assert fileOut != null;
+            fileOut.write((username + "\n" + key).getBytes());
+            fileOut.flush();
+        } catch (IOException e) {
+            System.out.println("Unable to save credentials!");
+        }
+
+        try {
+            fileOut.close();
+        } catch (IOException e) {
+            e.printStackTrace();
         }
     }
 }

@@ -5,6 +5,8 @@ import java.io.*;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 import java.sql.*;
+import java.time.*;
+import java.time.format.DateTimeFormatter;
 
 import aether.security.*;
 
@@ -14,6 +16,7 @@ import javax.crypto.NoSuchPaddingException;
 
 public class ChatClientHandler implements Runnable{
     private Socket handle;
+    private String processId;
 
     private final String JDBC_DRIVER = "org.mariadb.jdbc.Driver";
     private final String DB_URL = "jdbc:mysql://localhost/test";
@@ -29,8 +32,16 @@ public class ChatClientHandler implements Runnable{
     private DataInputStream inStream;
     private DataOutputStream outStream;
 
-    public ChatClientHandler(Socket sock){
+    private boolean loggedIn = false;
+    private String user;
+
+    ChatClientHandler(Socket sock){
+        this(sock, sock.getRemoteSocketAddress().toString());
+    }
+
+    ChatClientHandler(Socket sock, String processId) {
         handle = sock;
+        this.processId = processId;
     }
 
     public void run(){
@@ -50,9 +61,8 @@ public class ChatClientHandler implements Runnable{
 
         // Request handle loop
         while (true) {
-
             // Receive Query
-            String request = null;
+            String request;
             try {
                 request = receiveData();
                 log("Query Received : " + request);
@@ -82,8 +92,17 @@ public class ChatClientHandler implements Runnable{
             }
 
             // Process the request
-            String result = "Unknown function " + function;
+            String result;
             switch (function){
+                case "login":
+                    result = login(args);
+                    break;
+                case "check_username":
+                    result = userExists(args);
+                    break;
+                case "register":
+                    result = registerUser(args);
+                    break;
                 case "search":
                     result = search(args);
                     break;
@@ -130,7 +149,6 @@ public class ChatClientHandler implements Runnable{
             } catch (IOException ex) {
                 log("Unable to close connection!");
             }
-            return;
         }
     }
 
@@ -141,10 +159,7 @@ public class ChatClientHandler implements Runnable{
             keygen = new RSAKeyPairGenerator();
         } catch (NoSuchAlgorithmException e) {
             log("RSA Algorithm not found!\nSecure Connection cannot be established");
-            keygen = null;
         }
-
-        log("Public key generated : " + keygen.getPublicKeyAsString());
 
         if (keygen == null) {
             try {
@@ -167,6 +182,8 @@ public class ChatClientHandler implements Runnable{
             return;
         }
 
+        log("Public key generated : " + keygen.getPublicKeyAsString());
+
         try {
             outStream.writeUTF(keygen.getPublicKeyAsString());
             outStream.flush();
@@ -187,7 +204,7 @@ public class ChatClientHandler implements Runnable{
             Class.forName(JDBC_DRIVER);
             log("Connecting to database");
             dbConn = DriverManager.getConnection(DB_URL, USER, PASS);
-            dbQuery = dbConn.createStatement();
+            dbQuery = dbConn.createStatement(ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY);
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -213,29 +230,97 @@ public class ChatClientHandler implements Runnable{
     }
 
     private void log(String msg) {
-        System.out.println(handle.getRemoteSocketAddress().toString() + "\t|\t" + msg);
+        System.out.println(processId + "\t|\t" + msg);
+    }
+
+    private String login(String args) {
+        String[] credentials = args.split(",");
+        String username = credentials[0];
+        String key = credentials[1];
+        String sql = "SELECT * from users WHERE username='" + username + "'";
+        ResultSet dbRes;
+        try {
+            dbRes = dbQuery.executeQuery(sql);
+        } catch (SQLException e) {
+            log("Error executing query!");
+            return "Server Error";
+        }
+        try {
+            if (getResultSize(dbRes) != 1) {
+                return "Invalid user";
+            } else if (dbRes.next() && dbRes.getString("user_key").equals(key)) {
+                loggedIn = true;
+                this.user = username;
+                log("User : " + user +" logged in");
+                return "Successfully logged in!";
+            }
+        } catch (SQLException e) {
+            log("Error logging user in : " + username);
+            return "Server error | SQL Error";
+        }
+
+        return "Key is corrupt";
+    }
+
+    private int getResultSize(ResultSet resultSet) throws SQLException {
+        int size = 0;
+        resultSet.last();
+        size = resultSet.getRow();
+        resultSet.beforeFirst();
+        return size;
+    }
+
+    private String userExists(String args) {
+        String sql = "SELECT * from users WHERE username='" + args +"'";
+        ResultSet dbRes = null;
+        try {
+            dbRes = dbQuery.executeQuery(sql);
+            if (getResultSize(dbRes) >= 1) {
+                return "true";
+            }
+        } catch (SQLException e) {
+            return "undefined";
+        }
+        return "false";
+    }
+
+    private String registerUser(String args) {
+        String[] credentials = args.split(",");
+        String username = credentials[0];
+        String key = credentials[1];
+        String fullName = credentials[2];
+        log("Login Key : " + key);
+        try {
+            DateTimeFormatter dtf = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+            LocalDateTime now = LocalDateTime.now();
+            String sql = "INSERT INTO users (username, dateJoined, fullName, user_key) VALUES ('" + username + "', '" + dtf.format(now) + "', '" + fullName + "', '" + key + "')";
+            dbQuery.executeQuery(sql);
+        } catch (SQLException e) {
+            return "Failed | " + e.toString();
+        }
+
+        return "Success";
     }
 
     private String search(String args){
-        String res = "An unexpected error occurred!!";
+        StringBuilder res = new StringBuilder("An unexpected error occurred!!");
 
         try {
             String sql = "SELECT * from users WHERE username='" + args +"' or fullName='" + args + "'";
             ResultSet dbRes = dbQuery.executeQuery(sql);
 
-            res = "Names -\n";
+            res = new StringBuilder("Names -\n");
             while (dbRes.next()) {
                 String name = dbRes.getString("fullName");
                 int id = dbRes.getInt("id");
-                res += id + " : " + name +"\n";
+                res.append(id).append(" : ").append(name).append("\n");
             }
-
             dbRes.close();
         } catch (SQLException e) {
             e.printStackTrace();
         }
 
-        return res;
+        return res.toString();
     }
 
     private String send(String args){
