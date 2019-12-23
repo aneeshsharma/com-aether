@@ -4,8 +4,6 @@ import java.io.*;
 import java.net.*;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
-import java.security.SecureRandom;
-import java.util.Base64;
 
 import aether.security.AESUtil;
 import aether.security.RSAUtil;
@@ -21,9 +19,9 @@ public class ChatClient {
     private static DataOutputStream outStream;
     private static DataInputStream inStream;
 
-    public static void main(String[] args) {
-        Socket sock;
+    private static Socket sock;
 
+    public static void main(String[] args) {
         BufferedReader stdin = new BufferedReader(new InputStreamReader(System.in));
 
         try {
@@ -37,26 +35,8 @@ public class ChatClient {
             System.out.println("Using default server");
         }
 
-        try{
-            sock = new Socket(ip, 7200);
-            inStream = new DataInputStream(sock.getInputStream());
-            outStream = new DataOutputStream(sock.getOutputStream());
-        } catch (IOException e){
-            System.out.println("Error connecting to server!!\n"+e);
-            return;
-        }
-
-        try {
-            String publicKey = inStream.readUTF();
-            secretKey = AESUtil.generateKey();
-            String cryptData = RSAUtil.encryptToString(secretKey, publicKey);
-            outStream.writeUTF(cryptData);
-            outStream.flush();
-        } catch (IOException e) {
-            System.out.println("Unable to retrieve public key!");
-        } catch (NoSuchPaddingException | NoSuchAlgorithmException | InvalidKeyException | IllegalBlockSizeException | BadPaddingException e) {
-            e.printStackTrace();
-        }
+        // Encrypt the connection pipe
+        establishSecureConnection();
 
         while (true) {
             String input = null;
@@ -84,17 +64,14 @@ public class ChatClient {
             }
         }
 
-        try {
-            outStream.close();
-            inStream.close();
-            sock.close();
-        } catch (IOException e){
-            System.out.println("Error closing connection!");
-        }
+        // Close the connection
+        closeConnection();
     }
 
     private static void sendData(String data) throws IOException {
         String encryptedData = AESUtil.encrypt(data, secretKey);
+        if (encryptedData == null)
+            return; // Add something though
         outStream.writeUTF(encryptedData);
         outStream.flush();
     }
@@ -103,5 +80,38 @@ public class ChatClient {
         String encryptedData = inStream.readUTF();
         String decryptedData = AESUtil.decrypt(encryptedData, secretKey);
         return decryptedData;
+    }
+
+    private static void establishSecureConnection() {
+        try{
+            sock = new Socket(ip, 7200);
+            inStream = new DataInputStream(sock.getInputStream());
+            outStream = new DataOutputStream(sock.getOutputStream());
+        } catch (IOException e){
+            System.out.println("Error connecting to server!!\n"+e);
+            return;
+        }
+
+        try {
+            String publicKey = inStream.readUTF();
+            secretKey = AESUtil.generateKey();
+            String cryptData = RSAUtil.encryptToString(secretKey, publicKey);
+            outStream.writeUTF(cryptData);
+            outStream.flush();
+        } catch (IOException e) {
+            System.out.println("Unable to retrieve public key!");
+        } catch (NoSuchPaddingException | NoSuchAlgorithmException | InvalidKeyException | IllegalBlockSizeException | BadPaddingException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private static void closeConnection() {
+        try {
+            outStream.close();
+            inStream.close();
+            sock.close();
+        } catch (IOException e){
+            System.out.println("Error closing connection!");
+        }
     }
 }

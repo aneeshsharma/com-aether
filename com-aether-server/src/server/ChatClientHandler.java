@@ -34,6 +34,91 @@ public class ChatClientHandler implements Runnable{
     }
 
     public void run(){
+        log("Initializing connection...");
+
+        initializeConnection();
+
+        log("Securing connection...");
+
+        establishSecureConnection();
+
+        log("Secure Connection Established!");
+
+        connectToDBServer();
+
+        log("Database connected!");
+
+        // Request handle loop
+        while (true) {
+
+            // Receive Query
+            String request = null;
+            try {
+                request = receiveData();
+                log("Query Received : " + request);
+            } catch (EOFException eof) {
+                log("Client Disconnected!");
+                break;
+            } catch (IOException e) {
+                log("An IO Exception Occurred!");
+                break;
+            }
+
+            String function;
+            String args;
+
+            // Separate request function and arguments
+            try {
+                function = request.substring(0, request.indexOf(':'));
+                args = request.substring(request.indexOf(':') + 1);
+            } catch (Exception e){
+                log("Invalid request format : " + request + "\n" + e);
+                try {
+                    sendData("Invalid Query");
+                } catch (IOException ioe) {
+                    break;
+                }
+                continue;
+            }
+
+            // Process the request
+            String result = "Unknown function " + function;
+            switch (function){
+                case "search":
+                    result = search(args);
+                    break;
+                case "send":
+                    result = send(args);
+                    break;
+                default:
+                    log("Unknown function " + function + " | Skipped");
+                    result = "Invalid Query!!";
+            }
+
+            // Return result to client
+            try {
+                sendData(result);
+            } catch (IOException e) {
+                log("Unable to send result to client!");
+            }
+        }
+
+        log("Closing connection...");
+        closeConnection();
+    }
+
+    private String receiveData() throws IOException {
+        String encryptedData = inStream.readUTF();
+        return AESUtil.decrypt(encryptedData, secretKey);
+    }
+
+    private void sendData(String data) throws IOException {
+        String encryptedData = AESUtil.encrypt(data, secretKey);
+        outStream.writeUTF(encryptedData);
+        outStream.flush();
+    }
+
+    private void initializeConnection() {
         try {
             inStream = new DataInputStream(handle.getInputStream());
             outStream = new DataOutputStream(handle.getOutputStream());
@@ -47,9 +132,9 @@ public class ChatClientHandler implements Runnable{
             }
             return;
         }
+    }
 
-        log("Initializing RSA...");
-
+    private void establishSecureConnection() {
         RSAKeyPairGenerator keygen = null;
 
         try {
@@ -92,71 +177,23 @@ public class ChatClientHandler implements Runnable{
         } catch (NoSuchAlgorithmException | InvalidKeyException | NoSuchPaddingException | BadPaddingException | IllegalBlockSizeException e) {
             e.printStackTrace();
         }
+    }
 
-        log("Secure Connection Established!");
-
+    private void connectToDBServer() {
         dbConn = null;
         dbQuery = null;
 
         try {
             Class.forName(JDBC_DRIVER);
-
             log("Connecting to database");
             dbConn = DriverManager.getConnection(DB_URL, USER, PASS);
             dbQuery = dbConn.createStatement();
         } catch (Exception e) {
             e.printStackTrace();
         }
+    }
 
-        log("Database connected!");
-
-        while (true) {
-            String request = null;
-            try {
-                request = receiveData();
-                log("Query Received : " + request);
-            } catch (EOFException eof) {
-                log("Client Disconnected!");
-                break;
-            } catch (IOException e) {
-                log("An IO Exception Occurred!");
-                break;
-            }
-
-            String function;
-            String args;
-
-            try {
-                function = request.substring(0, request.indexOf(':'));
-                args = request.substring(request.indexOf(':') + 1);
-            } catch (Exception e){
-                log("Invalid request format : " + request + "\n" + e);
-                try {
-                    sendData("Invalid Query");
-                } catch (IOException ioe) {
-                    break;
-                }
-                continue;
-            }
-            String result = "Unknown function " + function;
-            switch (function){
-                case "search":
-                    result = search(args);
-                    break;
-                case "send":
-                    result = send(args);
-                    break;
-                default:
-                    log("Unknown function " + function + " | Skipped");
-                    result = "Invalid Query!!";
-            }
-
-            try {
-                sendData(result);
-            } catch (IOException e) {
-                log("Unable to send result to client!");
-            }
-        }
+    private void closeConnection() {
         try {
             inStream.close();
             outStream.close();
@@ -173,17 +210,6 @@ public class ChatClientHandler implements Runnable{
         } catch (SQLException e){
             e.printStackTrace();
         }
-    }
-
-    private String receiveData() throws IOException {
-        String encryptedData = inStream.readUTF();
-        return AESUtil.decrypt(encryptedData, secretKey);
-    }
-
-    private void sendData(String data) throws IOException {
-        String encryptedData = AESUtil.encrypt(data, secretKey);
-        outStream.writeUTF(encryptedData);
-        outStream.flush();
     }
 
     private void log(String msg) {
