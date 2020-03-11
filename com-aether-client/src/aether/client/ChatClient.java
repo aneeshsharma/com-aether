@@ -53,7 +53,7 @@ public class ChatClient {
                 InputStreamReader fileStream = new InputStreamReader(new FileInputStream(credentialsFile));
                 credIn = new BufferedReader(fileStream);
             } catch (FileNotFoundException e2) {
-                System.out.println("Resgistration failed!");
+                System.out.println("Registration failed!");
                 return;
             }
         }
@@ -159,6 +159,10 @@ public class ChatClient {
         }
     }
 
+    /**
+     * Method to register a new user on the local device as well as the server
+     * @param dataDir The directory where all user data is to be stored
+     */
     private static void registerNewUser(String dataDir) {
         BufferedReader stdin = new BufferedReader(new InputStreamReader(System.in));
         System.out.println("Register new user");
