@@ -4,7 +4,10 @@ import java.io.*;
 import java.net.*;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
+import java.sql.SQLException;
 
+import aether.data.ChatData;
+import aether.exceptions.ConnectionError;
 import aether.security.AESUtil;
 import aether.security.RSAUtil;
 
@@ -15,6 +18,11 @@ import javax.crypto.NoSuchPaddingException;
 public class ChatClient {
     private static String secretKey;
     private static String ip = "localhost";
+    private static String dataDir = "/.aether-data/";
+
+    private static String password;
+
+    private static String username, key;
 
     private static DataOutputStream outStream;
     private static DataInputStream inStream;
@@ -22,6 +30,9 @@ public class ChatClient {
     private static Socket sock;
 
     public static void main(String[] args) {
+        String home = System.getProperty("user.home");
+        dataDir = home + "/.aether-data/";
+
         BufferedReader stdin = new BufferedReader(new InputStreamReader(System.in));
 
         try {
@@ -36,39 +47,14 @@ public class ChatClient {
         }
 
         // Encrypt the connection pipe
-        establishSecureConnection();
-
-        String home = System.getProperty("user.home");
-
-        String dataDir = home + "/.aether-data/";
-
-        File credentialsFile = new File(dataDir + ".credentials");
-        BufferedReader credIn = null;
         try {
-            InputStreamReader fileStream = new InputStreamReader(new FileInputStream(credentialsFile));
-            credIn = new BufferedReader(fileStream);
-        } catch (FileNotFoundException e) {
-            registerNewUser(dataDir);
-            try {
-                InputStreamReader fileStream = new InputStreamReader(new FileInputStream(credentialsFile));
-                credIn = new BufferedReader(fileStream);
-            } catch (FileNotFoundException e2) {
-                System.out.println("Registration failed!");
-                return;
-            }
-        }
-
-        // Make sure the file input stream isn't null
-        assert credIn != null;
-
-        String username = null, key=null;
-        try {
-            username = credIn.readLine();
-            key = credIn.readLine();
-        } catch (IOException e) {
-            System.out.println("Error fetching credentials!");
+            establishSecureConnection();
+        } catch (ConnectionError connectionError) {
+            System.out.print("Connection error: " + connectionError.getMessage());
             return;
         }
+
+        initializeVault();
 
         String loginMsg = "Cannot authenticate user | Server error";
 
@@ -81,8 +67,25 @@ public class ChatClient {
 
         System.out.println(loginMsg);
 
+        ChatData chatData = null;
+        try {
+            chatData = new ChatData("ChatData", "chatDataTest.db");
+        } catch (ClassNotFoundException | SQLException e) {
+            e.printStackTrace();
+        }
+
+        try {
+            assert chatData != null;
+            chatData.addMessage("receiver", "hello!", "me", "SENT");
+            System.out.println("Chats:\n" + chatData.getAllChats());
+            System.out.println("CHat: \n" + chatData.getLastNMessages("receiver", 5));
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+
         if (!loginMsg.equals("Successfully logged in!"))
             return;
+
         while (true) {
             String input = null;
             try {
@@ -102,8 +105,7 @@ public class ChatClient {
                 sendData(input);
                 String str = receiveData();
                 System.out.println("Message Received : " + str);
-            }
-            catch (IOException e){
+            } catch (IOException e) {
                 System.out.println("Error sending request!");
                 break;
             }
@@ -111,6 +113,43 @@ public class ChatClient {
 
         // Close the connection
         closeConnection();
+    }
+
+    private static void initializeVault() {
+        BufferedReader stdin = new BufferedReader(new InputStreamReader(System.in));
+
+        File credentialsFile = new File(dataDir + ".credentials");
+
+        BufferedReader credIn;
+        try {
+            InputStreamReader fileStream = new InputStreamReader(new FileInputStream(credentialsFile));
+            credIn = new BufferedReader(fileStream);
+        } catch (FileNotFoundException e) {
+            registerNewUser(dataDir);
+            try {
+                InputStreamReader fileStream = new InputStreamReader(new FileInputStream(credentialsFile));
+                credIn = new BufferedReader(fileStream);
+            } catch (FileNotFoundException e2) {
+                System.out.println("Registration failed!");
+                return;
+            }
+        }
+
+        try {
+            System.out.print("Password: ");
+            password = stdin.readLine();
+        } catch (IOException e) {
+            System.out.println("Cannot read password!");
+        }
+
+        username = null;
+        key = null;
+        try {
+            username = credIn.readLine();
+            key = credIn.readLine();
+        } catch (Exception e) {
+            System.out.println("Error fetching credentials!");
+        }
     }
 
     private static void sendData(String data) throws IOException {
@@ -126,14 +165,13 @@ public class ChatClient {
         return AESUtil.decrypt(encryptedData, secretKey);
     }
 
-    private static void establishSecureConnection() {
+    private static void establishSecureConnection() throws ConnectionError {
         try{
             sock = new Socket(ip, 7200);
             inStream = new DataInputStream(sock.getInputStream());
             outStream = new DataOutputStream(sock.getOutputStream());
-        } catch (IOException e){
-            System.out.println("Error connecting to server!!\n"+e);
-            return;
+        } catch (IOException e) {
+            throw new ConnectionError("Cannot connect to server");
         }
 
         try {
@@ -200,7 +238,7 @@ public class ChatClient {
         try {
             fullName = stdin.readLine();
         } catch (IOException e) {
-            fullName = "";
+            fullName = " ";
         }
 
         String registrationStatus = "Failed";

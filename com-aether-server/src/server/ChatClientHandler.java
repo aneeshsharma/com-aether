@@ -8,6 +8,7 @@ import java.sql.*;
 import java.time.*;
 import java.time.format.DateTimeFormatter;
 
+import aether.exceptions.ConnectionError;
 import aether.security.*;
 
 import javax.crypto.BadPaddingException;
@@ -51,7 +52,14 @@ public class ChatClientHandler implements Runnable{
 
         log("Securing connection...");
 
-        establishSecureConnection();
+        try {
+            establishSecureConnection();
+        } catch (ConnectionError connectionError) {
+            System.out.println("Cannot establish secure connection : " + connectionError.getMessage());
+            connectionError.printStackTrace();
+            closeConnection();
+            return;
+        }
 
         log("Secure Connection Established!");
 
@@ -152,7 +160,7 @@ public class ChatClientHandler implements Runnable{
         }
     }
 
-    private void establishSecureConnection() {
+    private void establishSecureConnection() throws ConnectionError {
         RSAKeyPairGenerator keygen = null;
 
         try {
@@ -191,6 +199,7 @@ public class ChatClientHandler implements Runnable{
             secretKey = RSAUtil.decrypt(cryptData, keygen.getPrivateKey());
         } catch (IOException e) {
             System.out.println("Unable to contact client!!");
+            throw new ConnectionError("Client silent");
         } catch (NoSuchAlgorithmException | InvalidKeyException | NoSuchPaddingException | BadPaddingException | IllegalBlockSizeException e) {
             e.printStackTrace();
         }
@@ -263,16 +272,15 @@ public class ChatClientHandler implements Runnable{
     }
 
     private int getResultSize(ResultSet resultSet) throws SQLException {
-        int size = 0;
         resultSet.last();
-        size = resultSet.getRow();
+        int size = resultSet.getRow();
         resultSet.beforeFirst();
         return size;
     }
 
     private String userExists(String args) {
         String sql = "SELECT * from users WHERE username='" + args +"'";
-        ResultSet dbRes = null;
+        ResultSet dbRes;
         try {
             dbRes = dbQuery.executeQuery(sql);
             if (getResultSize(dbRes) >= 1) {

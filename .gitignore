@@ -71,3 +71,6 @@ fabric.properties
 
 *.iml
 .idea/
+
+# All db files
+*.db
