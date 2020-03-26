@@ -1,8 +1,12 @@
 package aether.data;
 
 import java.io.File;
+import java.security.KeyException;
 import java.sql.*;
 import aether.data.QUERIES;
+import aether.exceptions.FileDecryptionError;
+import aether.exceptions.FileEncryptionError;
+import aether.security.AESUtil;
 
 public class ChatData {
     private final String JDBC_DRIVER = "org.sqlite.JDBC";
@@ -12,13 +16,31 @@ public class ChatData {
     private Statement stmt;
     private DatabaseMetaData dbm;
     private String processName;
+    private String fileName;
 
-    public ChatData(String processName, String fileName) throws ClassNotFoundException, SQLException {
+    private String key;
+
+    private boolean log;
+
+    public ChatData(String processName, String fileName, String password) throws ClassNotFoundException, SQLException, KeyException, FileDecryptionError {
         String DB_URL = DB_URL_PREFIX + fileName;
         this.processName = processName;
+        this.fileName = fileName;
+        log = true;
+        key = password;
+        if (key.length() != 16) {
+            throw new KeyException("Invalid key size " + key.length());
+        }
         File dbFile = new File(fileName);
-        if (!dbFile.exists() || dbFile.isDirectory()) {
-            log("Given file doesn't exist creating new database");
+        File encFile = new File(fileName + ".enc");
+        if (dbFile.exists() && !dbFile.isDirectory()) {
+            log("Previous logout wasn't successful! Chat data was vulnerable");
+        } else {
+            if (encFile.exists() && !encFile.isDirectory()) {
+                AESUtil.decryptFile(fileName + ".enc", fileName, key);
+            } else {
+                log("Creating new database");
+            }
         }
 
         conn = null;
@@ -94,27 +116,38 @@ public class ChatData {
     }
 
     public String getLastNMessages(String receiverName, int n) throws SQLException {
-        String getQuery = "SELECT * FROM ( SELECT id, author, message, message_date, message_status, ROW_NUMBER() OVER (ORDER BY id DESC) AS rank FROM " + getTableName(receiverName) + ") " +
-                            "WHERE rank <= " + n + " ORDER BY rank DESC";
-        log("Executing : " + getQuery);
-        ResultSet resultSet = stmt.executeQuery(getQuery);
-        StringBuilder result = new StringBuilder();
-        while (resultSet.next()) {
-            int id = resultSet.getInt("id");
-            String author = resultSet.getString("author");
-            String message = resultSet.getString("message");
-            String message_date = resultSet.getString("message_date");
-            String status = resultSet.getString("message_status");
-            result.append(id).append(" | ").append(author).append(" : ").append(message).append(" > ").append(message_date).append(" | ").append(status).append("\n");
+        if (tableExists(getTableName(receiverName))) {
+            String getQuery = "SELECT * FROM ( SELECT id, author, message, message_date, message_status, ROW_NUMBER() OVER (ORDER BY id DESC) AS rank FROM " + getTableName(receiverName) + ") " +
+                    "WHERE rank <= " + n + " ORDER BY rank DESC";
+            log("Executing : " + getQuery);
+            ResultSet resultSet = stmt.executeQuery(getQuery);
+            StringBuilder result = new StringBuilder();
+            while (resultSet.next()) {
+                int id = resultSet.getInt("id");
+                String author = resultSet.getString("author");
+                String message = resultSet.getString("message");
+                String message_date = resultSet.getString("message_date");
+                String status = resultSet.getString("message_status");
+                result.append(id).append(" | ").append(author).append(" : ").append(message).append(" > ").append(message_date).append(" | ").append(status).append("\n");
+            }
+            return result.toString();
+        } else {
+            return "No such receiver";
+
         }
-        return result.toString();
+    }
+
+    public void setLog(boolean doLog) {
+        log = doLog;
     }
 
     private void log(String msg) {
-        System.out.println(processName + " | " + msg);
+        if (log)
+            System.out.println(processName + " | " + msg);
     }
 
-    public void close() throws SQLException {
+    public void close() throws SQLException, FileEncryptionError {
+        AESUtil.encryptFile(fileName, fileName + ".enc", key);
         conn.close();
         stmt.close();
     }

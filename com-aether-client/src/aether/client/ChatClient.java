@@ -2,12 +2,16 @@ package aether.client;
 
 import java.io.*;
 import java.net.*;
+import java.nio.charset.StandardCharsets;
 import java.security.InvalidKeyException;
+import java.security.KeyException;
 import java.security.NoSuchAlgorithmException;
 import java.sql.SQLException;
+import java.util.Arrays;
+import java.util.Base64;
 
 import aether.data.ChatData;
-import aether.exceptions.ConnectionError;
+import aether.exceptions.*;
 import aether.security.AESUtil;
 import aether.security.RSAUtil;
 
@@ -27,13 +31,16 @@ public class ChatClient {
     private static DataOutputStream outStream;
     private static DataInputStream inStream;
 
+    private static BufferedReader stdin;
+
     private static Socket sock;
 
     public static void main(String[] args) {
         String home = System.getProperty("user.home");
         dataDir = home + "/.aether-data/";
 
-        BufferedReader stdin = new BufferedReader(new InputStreamReader(System.in));
+        stdin = new BufferedReader(new InputStreamReader(System.in));
+
 
         try {
             System.out.print("Server address (leave blank to use default): ");
@@ -54,7 +61,11 @@ public class ChatClient {
             return;
         }
 
-        initializeVault();
+        try {
+            initializeVault();
+        } catch (VaultError vaultError) {
+            vaultError.printStackTrace();
+        }
 
         String loginMsg = "Cannot authenticate user | Server error";
 
@@ -69,8 +80,8 @@ public class ChatClient {
 
         ChatData chatData = null;
         try {
-            chatData = new ChatData("ChatData", "chatDataTest.db");
-        } catch (ClassNotFoundException | SQLException e) {
+            chatData = new ChatData("ChatData", "chatDataTest.db", password);
+        } catch (ClassNotFoundException | SQLException | KeyException | FileDecryptionError e) {
             e.printStackTrace();
         }
 
@@ -113,43 +124,96 @@ public class ChatClient {
 
         // Close the connection
         closeConnection();
+        try {
+            chatData.close();
+        } catch (SQLException | FileEncryptionError e) {
+            e.printStackTrace();
+        }
     }
 
-    private static void initializeVault() {
-        BufferedReader stdin = new BufferedReader(new InputStreamReader(System.in));
+    private static boolean fileExists(String filename) {
+        File f = new File(filename);
+        return f.exists() && !f.isDirectory();
+    }
 
-        File credentialsFile = new File(dataDir + ".credentials");
-
-        BufferedReader credIn;
-        try {
-            InputStreamReader fileStream = new InputStreamReader(new FileInputStream(credentialsFile));
-            credIn = new BufferedReader(fileStream);
-        } catch (FileNotFoundException e) {
+    private static void initializeVault() throws VaultError {
+        if (!fileExists(dataDir + ".credentials")) {
             registerNewUser(dataDir);
+            System.out.println("Create new data encryption password");
             try {
-                InputStreamReader fileStream = new InputStreamReader(new FileInputStream(credentialsFile));
-                credIn = new BufferedReader(fileStream);
-            } catch (FileNotFoundException e2) {
-                System.out.println("Registration failed!");
-                return;
+                getNewPassword();
+            } catch (IOException e) {
+                throw new VaultError(e.getMessage());
+            }
+            String data = username + "\n" + key;
+            String encryptedData = AESUtil.encrypt(data, password);
+            try {
+                FileOutputStream file = new FileOutputStream(dataDir + ".credentials");
+                OutputStreamWriter fileOut = new OutputStreamWriter(file);
+                assert encryptedData != null;
+                fileOut.write(encryptedData);
+                fileOut.close();
+            } catch (IOException e) {
+                throw new VaultError(e);
+            }
+        } else {
+            String data;
+            try {
+                System.out.print("Password: ");
+                password = stdin.readLine();
+                password = padRight(password, 16);
+                InputStreamReader fileIn = new InputStreamReader(new FileInputStream(dataDir + ".credentials"));
+                int read;
+                char[] buf = new char[128];
+                StringBuilder result = new StringBuilder();
+                while ((read = fileIn.read(buf)) != -1) {
+                    String readData = String.valueOf(buf, 0, read);
+                    result.append(readData);
+                }
+                data = result.toString();
+            } catch (IOException e) {
+                throw new VaultError(e);
+            }
+
+            String decryptedData = AESUtil.decrypt(data, password);
+
+            try {
+                assert decryptedData != null;
+                String[] credentials = decryptedData.split("\n");
+                username = credentials[0];
+                key = credentials[1];
+            } catch (NullPointerException | IndexOutOfBoundsException e) {
+                throw new VaultError(e);
             }
         }
+    }
 
-        try {
-            System.out.print("Password: ");
-            password = stdin.readLine();
-        } catch (IOException e) {
-            System.out.println("Cannot read password!");
+    private static void getNewPassword() throws IOException {
+        String passwordRead, passwordConfirm;
+        while (true) {
+            // To read password properly
+            //passwordRead = new String(console.readPassword("New User Enter a password: "));
+            //String passwordConfirm = new String(console.readPassword("Confirm Password: "));
+            System.out.print("Enter a password: ");
+            passwordRead = stdin.readLine();
+            if (passwordRead.length() > 16) {
+                System.out.println("Password cannot be larger than 16 chatacters!");
+                continue;
+            }
+            System.out.print("Confirm Password: ");
+            passwordConfirm = stdin.readLine();
+            if (passwordRead.equals(passwordConfirm))
+                break;
+            else
+                System.out.println("Passwords didn't match!");
         }
+        password = passwordRead;
+        password = padRight(password, 16);
 
-        username = null;
-        key = null;
-        try {
-            username = credIn.readLine();
-            key = credIn.readLine();
-        } catch (Exception e) {
-            System.out.println("Error fetching credentials!");
-        }
+    }
+
+    public static String padRight(String s, int n) {
+        return String.format("%-" + n + "s", s);
     }
 
     private static void sendData(String data) throws IOException {
@@ -237,6 +301,8 @@ public class ChatClient {
         System.out.print("Full Name (optional): ");
         try {
             fullName = stdin.readLine();
+            if (fullName.length() <= 0)
+                fullName = "N/A";
         } catch (IOException e) {
             fullName = " ";
         }
@@ -253,28 +319,7 @@ public class ChatClient {
         if (!registrationStatus.equals("Success")) {
             return;
         }
-
-        OutputStream fileOut = null;
-        File credentialFile;
-        try {
-            credentialFile = new File(dataDir + ".credentials");
-            fileOut = new FileOutputStream(credentialFile);
-        } catch (FileNotFoundException e) {
-            e.printStackTrace();
-        }
-
-        try {
-            assert fileOut != null;
-            fileOut.write((username + "\n" + key).getBytes());
-            fileOut.flush();
-        } catch (IOException e) {
-            System.out.println("Unable to save credentials!");
-        }
-
-        try {
-            fileOut.close();
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
+        ChatClient.username = username;
+        ChatClient.key = key;
     }
 }
