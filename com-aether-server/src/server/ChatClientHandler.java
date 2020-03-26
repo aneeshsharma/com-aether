@@ -8,6 +8,7 @@ import java.sql.*;
 import java.time.*;
 import java.time.format.DateTimeFormatter;
 
+import aether.data.QUERIES;
 import aether.exceptions.ConnectionError;
 import aether.security.*;
 
@@ -117,6 +118,12 @@ public class ChatClientHandler implements Runnable{
                 case "send":
                     result = send(args);
                     break;
+                case "connect":
+                    result = connectToUser(args);
+                    break;
+                case "nothing":
+                    result = "OKAY";
+                    break;
                 default:
                     log("Unknown function " + function + " | Skipped");
                     result = "Invalid Query!!";
@@ -134,6 +141,31 @@ public class ChatClientHandler implements Runnable{
         closeConnection();
     }
 
+    private void updateRequest(String username, String from, String update_data) throws SQLException {
+        if (!tableExists(getTableName(username))) {
+            createUpdatesTable(username);
+        }
+        String sql = "INSERT INTO " + getTableName(username) + " (from, type, update_data, date_created) VALUES ('" + from + "', 'UPDATE', '" + update_data + "', CURDATE())";
+        dbQuery.executeUpdate(sql);
+    }
+
+    private void connectionRequest(String username, String from, String update_data) throws SQLException {
+        if (!tableExists(getTableName(username))) {
+            createUpdatesTable(username);
+        }
+        String sql = "INSERT INTO " + getTableName(username) + " (from, type, update_data, date_created) VALUES ('" + from + "', 'REQUEST', '" + update_data + "', CURDATE())";
+        dbQuery.executeUpdate(sql);
+    }
+
+    private String getTableName(String username) {
+        return "update_data_" + username;
+    }
+
+    private void createUpdatesTable(String username) throws SQLException {
+        String createQuery = "CREATE TABLE " + getTableName(username) + " " + QUERIES.NEW_UPDATE_TABLE_FIELDS;
+        dbQuery.executeUpdate(createQuery);
+    }
+
     private String receiveData() throws IOException {
         String encryptedData = inStream.readUTF();
         return AESUtil.decrypt(encryptedData, secretKey);
@@ -141,6 +173,7 @@ public class ChatClientHandler implements Runnable{
 
     private void sendData(String data) throws IOException {
         String encryptedData = AESUtil.encrypt(data, secretKey);
+        assert encryptedData != null;
         outStream.writeUTF(encryptedData);
         outStream.flush();
     }
@@ -214,9 +247,20 @@ public class ChatClientHandler implements Runnable{
             log("Connecting to database");
             dbConn = DriverManager.getConnection(DB_URL, USER, PASS);
             dbQuery = dbConn.createStatement(ResultSet.TYPE_SCROLL_INSENSITIVE, ResultSet.CONCUR_READ_ONLY);
-        } catch (Exception e) {
+
+            if (!tableExists("users")) {
+                log("Users table doesn't exist creating one");
+                dbQuery.executeUpdate(QUERIES.USERS_TABLE_CREATE_QUERY);
+            }
+        } catch (ClassNotFoundException | SQLException e) {
             e.printStackTrace();
         }
+    }
+
+    private boolean tableExists(String name) throws SQLException {
+        DatabaseMetaData dbm = dbConn.getMetaData();
+        ResultSet res = dbm.getTables(null, null, name, new String[] {"TABLE"});
+        return res.next();
     }
 
     private void closeConnection() {
@@ -240,6 +284,13 @@ public class ChatClientHandler implements Runnable{
 
     private void log(String msg) {
         System.out.println(processId + "\t|\t" + msg);
+    }
+
+    private int getResultSize(ResultSet resultSet) throws SQLException {
+        resultSet.last();
+        int size = resultSet.getRow();
+        resultSet.beforeFirst();
+        return size;
     }
 
     private String login(String args) {
@@ -271,13 +322,6 @@ public class ChatClientHandler implements Runnable{
         return "Key is corrupt";
     }
 
-    private int getResultSize(ResultSet resultSet) throws SQLException {
-        resultSet.last();
-        int size = resultSet.getRow();
-        resultSet.beforeFirst();
-        return size;
-    }
-
     private String userExists(String args) {
         String sql = "SELECT * from users WHERE username='" + args +"'";
         ResultSet dbRes;
@@ -297,12 +341,12 @@ public class ChatClientHandler implements Runnable{
         String username = credentials[0];
         String key = credentials[1];
         String fullName = credentials[2];
+        String publicKey = credentials[3];
         log("Login Key : " + key);
         try {
-            DateTimeFormatter dtf = DateTimeFormatter.ofPattern("yyyy-MM-dd");
-            LocalDateTime now = LocalDateTime.now();
-            String sql = "INSERT INTO users (username, dateJoined, fullName, user_key) VALUES ('" + username + "', '" + dtf.format(now) + "', '" + fullName + "', '" + key + "')";
+            String sql = "INSERT INTO users (username, dateJoined, fullName, user_key, public_key) VALUES ('" + username + "', CURDATE(), '" + fullName + "', '" + key + "', '" + publicKey + "')";
             dbQuery.executeQuery(sql);
+            createUpdatesTable(username);
         } catch (SQLException e) {
             return "Failed | " + e.toString();
         }
@@ -333,5 +377,24 @@ public class ChatClientHandler implements Runnable{
 
     private String send(String args){
         return "Send not implemented";
+    }
+
+    private String connectToUser(String args) {
+        if (userExists(args).equals("true")) {
+            String sql = "SELECT public_key FROM users WHERE username='" + args + "'";
+            ResultSet resultSet;
+            try {
+                resultSet = dbQuery.executeQuery(sql);
+                if (resultSet.next()) {
+                    return resultSet.getString("public_key");
+                } else {
+                    return "NO SUCH USER:" + args;
+                }
+            } catch (SQLException e) {
+                return "SERVER ERROR";
+            }
+        } else {
+            return "NO SUCH USER:" + args;
+        }
     }
 }

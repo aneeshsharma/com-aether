@@ -3,7 +3,6 @@ package aether.data;
 import java.io.File;
 import java.security.KeyException;
 import java.sql.*;
-import aether.data.QUERIES;
 import aether.exceptions.FileDecryptionError;
 import aether.exceptions.FileEncryptionError;
 import aether.security.AESUtil;
@@ -60,6 +59,10 @@ public class ChatData {
             log("Executing : " + QUERIES.CHATS_TABLE_CREATE_QUERY);
             stmt.executeUpdate(QUERIES.CHATS_TABLE_CREATE_QUERY);
         }
+    }
+
+    public boolean connectionExists(String username) throws SQLException {
+        return tableExists(getTableName(username));
     }
 
     private String getTableName(String receiverName) {

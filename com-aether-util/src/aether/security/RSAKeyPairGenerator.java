@@ -27,4 +27,8 @@ public class RSAKeyPairGenerator {
     public String getPublicKeyAsString() {
         return Base64.getEncoder().encodeToString(publicKey.getEncoded());
     }
+
+    public String getPrivateKeyAsString() {
+        return Base64.getEncoder().encodeToString(privateKey.getEncoded());
+    }
 }

@@ -2,17 +2,15 @@ package aether.client;
 
 import java.io.*;
 import java.net.*;
-import java.nio.charset.StandardCharsets;
 import java.security.InvalidKeyException;
 import java.security.KeyException;
 import java.security.NoSuchAlgorithmException;
 import java.sql.SQLException;
-import java.util.Arrays;
-import java.util.Base64;
 
 import aether.data.ChatData;
 import aether.exceptions.*;
 import aether.security.AESUtil;
+import aether.security.RSAKeyPairGenerator;
 import aether.security.RSAUtil;
 
 import javax.crypto.BadPaddingException;
@@ -26,7 +24,7 @@ public class ChatClient {
 
     private static String password;
 
-    private static String username, key;
+    private static String username, key, privateKey, publicKey;
 
     private static DataOutputStream outStream;
     private static DataInputStream inStream;
@@ -40,7 +38,6 @@ public class ChatClient {
         dataDir = home + "/.aether-data/";
 
         stdin = new BufferedReader(new InputStreamReader(System.in));
-
 
         try {
             System.out.print("Server address (leave blank to use default): ");
@@ -64,7 +61,16 @@ public class ChatClient {
         try {
             initializeVault();
         } catch (VaultError vaultError) {
-            vaultError.printStackTrace();
+            System.out.println("couldn't retrieve credentials!");
+            return;
+        }
+
+        ChatData chatData;
+        try {
+            chatData = new ChatData("ChatData", "chatDataTest.db", password);
+        } catch (ClassNotFoundException | SQLException | KeyException | FileDecryptionError e) {
+            System.out.println("Unable to retrieve chat data! Exiting...");
+            return;
         }
 
         String loginMsg = "Cannot authenticate user | Server error";
@@ -76,26 +82,10 @@ public class ChatClient {
             System.out.println("Couldn't contact server!");
         }
 
-        System.out.println(loginMsg);
-
-        ChatData chatData = null;
-        try {
-            chatData = new ChatData("ChatData", "chatDataTest.db", password);
-        } catch (ClassNotFoundException | SQLException | KeyException | FileDecryptionError e) {
-            e.printStackTrace();
-        }
-
-        try {
-            assert chatData != null;
-            chatData.addMessage("receiver", "hello!", "me", "SENT");
-            System.out.println("Chats:\n" + chatData.getAllChats());
-            System.out.println("CHat: \n" + chatData.getLastNMessages("receiver", 5));
-        } catch (SQLException e) {
-            e.printStackTrace();
-        }
-
-        if (!loginMsg.equals("Successfully logged in!"))
+        if (!loginMsg.equals("Successfully logged in!")) {
+            System.out.println(loginMsg);
             return;
+        }
 
         while (true) {
             String input = null;
@@ -113,7 +103,12 @@ public class ChatClient {
                 break;
 
             try {
-                sendData(input);
+                try {
+                    sendData(processCommand(input));
+                } catch (InvalidCommandError e) {
+                    System.out.println("Invalid command : " + e.getMessage());
+                    continue;
+                }
                 String str = receiveData();
                 System.out.println("Message Received : " + str);
             } catch (IOException e) {
@@ -123,12 +118,35 @@ public class ChatClient {
         }
 
         // Close the connection
-        closeConnection();
+        try {
+            closeConnection();
+        } catch (ConnectionError connectionError) {
+            System.out.println("Error closing connection! " + connectionError.getMessage());
+        }
         try {
             chatData.close();
         } catch (SQLException | FileEncryptionError e) {
-            e.printStackTrace();
+            System.out.println("Error closing chat data! " + e.getMessage());
         }
+    }
+
+    private static String processCommand(String input) throws InvalidCommandError {
+        String request = "nothing:nothing";
+
+        // remove extra whte spaces
+        input = input.replaceAll("\\s+", " ");
+        input = input.strip();
+
+        if (input.startsWith("/command ")) {
+            request = input.substring("/command ".length());
+        } else if (input.startsWith("/connect ")) {
+            String name = input.substring("/connect ".length());
+            if (name.equals(username))
+                throw new InvalidCommandError("Cannot connect to self");
+            request = "connect:" + name;
+        }
+
+        return request;
     }
 
     private static boolean fileExists(String filename) {
@@ -138,14 +156,18 @@ public class ChatClient {
 
     private static void initializeVault() throws VaultError {
         if (!fileExists(dataDir + ".credentials")) {
-            registerNewUser(dataDir);
+            try {
+                registerNewUser();
+            } catch (RegistrationError registrationError) {
+                throw new VaultError(registrationError);
+            }
             System.out.println("Create new data encryption password");
             try {
                 getNewPassword();
             } catch (IOException e) {
                 throw new VaultError(e.getMessage());
             }
-            String data = username + "\n" + key;
+            String data = username + "\n" + key + "\n" + privateKey + "\n" + publicKey;
             String encryptedData = AESUtil.encrypt(data, password);
             try {
                 FileOutputStream file = new FileOutputStream(dataDir + ".credentials");
@@ -182,6 +204,8 @@ public class ChatClient {
                 String[] credentials = decryptedData.split("\n");
                 username = credentials[0];
                 key = credentials[1];
+                privateKey = credentials[2];
+                publicKey = credentials[3];
             } catch (NullPointerException | IndexOutOfBoundsException e) {
                 throw new VaultError(e);
             }
@@ -251,21 +275,20 @@ public class ChatClient {
         }
     }
 
-    private static void closeConnection() {
+    private static void closeConnection() throws ConnectionError {
         try {
             outStream.close();
             inStream.close();
             sock.close();
         } catch (IOException e){
-            System.out.println("Error closing connection!");
+            throw new ConnectionError(e);
         }
     }
 
     /**
      * Method to register a new user on the local device as well as the server
-     * @param dataDir The directory where all user data is to be stored
      */
-    private static void registerNewUser(String dataDir) {
+    private static void registerNewUser() throws RegistrationError {
         BufferedReader stdin = new BufferedReader(new InputStreamReader(System.in));
         System.out.println("Register new user");
         System.out.print("Username : ");
@@ -275,7 +298,7 @@ public class ChatClient {
             try {
                 username = stdin.readLine();
             } catch (IOException e) {
-                System.out.println("Error reading username");
+                throw new RegistrationError(e);
             }
 
             try {
@@ -285,17 +308,25 @@ public class ChatClient {
                     System.out.println("Username already exists please try a different username");
                 }
             } catch (IOException e) {
-                System.out.println("Unable to contact server please try again later");
+                throw new RegistrationError(e);
             }
         }
 
         if (!usernameExists.equals("false")) {
-            System.out.println("Unexpected error occurred!");
-            return;
+            throw new RegistrationError("Unexpected server error occurred!");
         }
 
         // Use the same key generator
         String key = AESUtil.generateKey();
+        RSAKeyPairGenerator keygen;
+        try {
+            keygen = new RSAKeyPairGenerator();
+        } catch (NoSuchAlgorithmException e) {
+            throw new RegistrationError(e);
+        }
+
+        privateKey = keygen.getPrivateKeyAsString();
+        publicKey = keygen.getPublicKeyAsString();
 
         String fullName;
         System.out.print("Full Name (optional): ");
@@ -307,12 +338,12 @@ public class ChatClient {
             fullName = " ";
         }
 
-        String registrationStatus = "Failed";
+        String registrationStatus;
         try {
-            sendData("register:" + username + "," + key + "," + fullName);
+            sendData("register:" + username + "," + key + "," + fullName + "," + publicKey);
             registrationStatus = receiveData();
         } catch (IOException e) {
-            System.out.println("Unable to contact server while registration!");
+            throw new RegistrationError(e);
         }
 
         System.out.println(registrationStatus);

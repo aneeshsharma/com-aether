@@ -9,7 +9,6 @@ import java.security.*;
 import java.util.*;
 
 import javax.crypto.*;
-import javax.crypto.spec.IvParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 
 public class AESUtil {
@@ -124,65 +123,6 @@ public class AESUtil {
             if (!originalFile.delete())
                 throw new FileDecryptionError("Unable to delete redundant files");
         }
-    }
-
-    private static String readEncryptedFile(String fileName, String key) throws NoSuchPaddingException, NoSuchAlgorithmException, InvalidAlgorithmParameterException, InvalidKeyException {
-        String content = null;
-        try (FileInputStream fileIn = new FileInputStream(fileName)) {
-            byte[] fileIv = new byte[16];
-            fileIn.read(fileIv);
-            Cipher cipher = Cipher.getInstance("AES/CBC/PKCS5Padding");
-            setKey(key);
-            cipher.init(Cipher.DECRYPT_MODE, keySpec, new IvParameterSpec(fileIv));
-
-            try (
-                    CipherInputStream cipherIn = new CipherInputStream(fileIn, cipher);
-                    InputStreamReader inputReader = new InputStreamReader(cipherIn);
-                    BufferedReader reader = new BufferedReader(inputReader)
-            ) {
-
-                int read;
-                char[] buf = new char[1024];
-                StringBuilder result = new StringBuilder();
-                while ((read = inputReader.read(buf)) != -1) {
-                    String data = String.valueOf(buf, 0, read);
-                    result.append(data);
-                }
-                content = result.toString();
-            }
-
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-        return content;
-    }
-
-    private static void writeEncryptedFile(String content, String fileName, String key) throws NoSuchPaddingException, NoSuchAlgorithmException, InvalidKeyException {
-        Cipher cipher = Cipher.getInstance("AES/CBC/PKCS5Padding");
-        setKey(key);
-        cipher.init(Cipher.ENCRYPT_MODE, keySpec);
-        byte[] iv = cipher.getIV();
-
-        try (FileOutputStream fileOut = new FileOutputStream(fileName);
-             CipherOutputStream cipherOut = new CipherOutputStream(fileOut, cipher)) {
-            fileOut.write(iv);
-            cipherOut.write(content.getBytes(StandardCharsets.UTF_8));
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
-
-    private static String readEntireFile(File file) throws IOException {
-        int length = (int) file.length();
-        char[] buf = new char[1024];
-        InputStreamReader fileStream = new InputStreamReader(new FileInputStream(file));
-        int read;
-        StringBuilder result = new StringBuilder();
-        while ((read = fileStream.read(buf)) != -1) {
-            String data = String.valueOf(buf, 0, read);
-            result.append(data);
-        }
-        return result.toString();
     }
 
     private static boolean fileExists(String filename) {
