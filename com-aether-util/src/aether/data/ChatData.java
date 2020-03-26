@@ -5,6 +5,7 @@ import java.security.KeyException;
 import java.sql.*;
 import aether.exceptions.FileDecryptionError;
 import aether.exceptions.FileEncryptionError;
+import aether.exceptions.NoSuchUserError;
 import aether.security.AESUtil;
 
 public class ChatData {
@@ -65,6 +66,18 @@ public class ChatData {
         return tableExists(getTableName(username));
     }
 
+    public String getEncryptionKey(String username) throws SQLException, NoSuchUserError {
+        if (!connectionExists(username))
+            throw new NoSuchUserError("No such user:" + username);
+        String getQuery = "SELECT private_key FROM chats WHERE receiver_name='" + username + "'";
+        ResultSet resultSet = stmt.executeQuery(getQuery);
+        if (resultSet.next()) {
+            return resultSet.getString("private_key");
+        } else {
+            throw new NoSuchUserError("Didn't get encryption key");
+        }
+    }
+
     private String getTableName(String receiverName) {
         return "chat_data_" + receiverName;
     }
@@ -78,20 +91,20 @@ public class ChatData {
         return res.next();
     }
 
-    public void newChat(String receiverName) throws SQLException {
+    public void newChat(String receiverName, String chatKey) throws SQLException {
         if (!tableExists(getTableName(receiverName))) {
             String createQuery = getCreateQuery(receiverName);
             log("Executing : " + createQuery);
             stmt.executeUpdate(createQuery);
-            String updateChatsQuery = "INSERT INTO chats (receiver_name, table_name, type) VALUES ('" + receiverName + "', '" + getTableName(receiverName) + "', 'PERSONAL')";
+            String updateChatsQuery = "INSERT INTO chats (receiver_name, table_name, type, private_key) VALUES ('" + receiverName + "', '" + getTableName(receiverName) + "', 'PERSONAL', '" + chatKey + "')";
             stmt.executeUpdate(updateChatsQuery);
         }
     }
 
-    public void addMessage(String receiverName, String message, String author, String status) throws SQLException {
-        if (!tableExists(getTableName(receiverName))) {
+    public void addMessage(String receiverName, String message, String author, String status) throws SQLException, NoSuchUserError {
+        if (!connectionExists(receiverName)) {
             log("No such chat exists, creating new chat...");
-            newChat(receiverName);
+            throw new NoSuchUserError("No such user:" + receiverName);
         }
         String sendQuery = "INSERT INTO " + getTableName(receiverName) + " (author, message, message_date, message_status) VALUES " +
                             "('" + author + "', '" + message + "', datetime('now'), '" + status + "')";

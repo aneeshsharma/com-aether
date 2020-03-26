@@ -15,6 +15,7 @@ import aether.security.*;
 import javax.crypto.BadPaddingException;
 import javax.crypto.IllegalBlockSizeException;
 import javax.crypto.NoSuchPaddingException;
+import javax.xml.transform.Result;
 
 public class ChatClientHandler implements Runnable{
     private Socket handle;
@@ -121,6 +122,15 @@ public class ChatClientHandler implements Runnable{
                 case "connect":
                     result = connectToUser(args);
                     break;
+                case "connection_request":
+                    result = placeConnectionRequest(args);
+                    break;
+                case "update":
+                    result = publishUpdates(args);
+                    break;
+                case "get_updates":
+                    result = getUpdates(args);
+                    break;
                 case "nothing":
                     result = "OKAY";
                     break;
@@ -145,7 +155,7 @@ public class ChatClientHandler implements Runnable{
         if (!tableExists(getTableName(username))) {
             createUpdatesTable(username);
         }
-        String sql = "INSERT INTO " + getTableName(username) + " (from, type, update_data, date_created) VALUES ('" + from + "', 'UPDATE', '" + update_data + "', CURDATE())";
+        String sql = "INSERT INTO " + getTableName(username) + " (from_user, type, update_data, date_created) VALUES ('" + from + "', 'UPDATE', '" + update_data + "', CURDATE())";
         dbQuery.executeUpdate(sql);
     }
 
@@ -153,8 +163,110 @@ public class ChatClientHandler implements Runnable{
         if (!tableExists(getTableName(username))) {
             createUpdatesTable(username);
         }
-        String sql = "INSERT INTO " + getTableName(username) + " (from, type, update_data, date_created) VALUES ('" + from + "', 'REQUEST', '" + update_data + "', CURDATE())";
+        if (alreadyRequested(username, from))
+            return;
+        String sql = "INSERT INTO " + getTableName(username) + " (from_user, type, update_date, date_created) VALUES ('" + from + "', 'REQUEST', '" + update_data + "', CURDATE())";
         dbQuery.executeUpdate(sql);
+    }
+
+    private String getUpdates(String args) {
+        String sql = "SELECT * FROM " + getTableName(args) + " ORDER BY id";
+        ResultSet resultSet = null;
+        try {
+            resultSet = dbQuery.executeQuery(sql);
+        } catch (SQLException e) {
+            try {
+                sendData("UNABLE TO FETCH UPDATES");
+            } catch (IOException ex) {
+                log("Unable to send data to client!");
+            }
+        }
+
+        assert resultSet != null;
+        String reply = "NEXT";
+        boolean sendComplete = true;
+        try {
+            while (resultSet.next()) {
+                String send;
+                try {
+                    send = "UPDATE:" + resultSet.getInt("id") + "," + resultSet.getString("from_user") + "," + resultSet.getString("type") + "," + resultSet.getString("update_date") + "," + resultSet.getString("update_date");
+                } catch (SQLException e) {
+                    try {
+                        log ("SQL Exception : " + e.getMessage());
+                        sendData("UNABLE TO FETCH UPDATES");
+                    } catch (IOException ex) {
+                        log("Unable to send data to client!");
+                    }
+                    sendComplete = false;
+                    break;
+                }
+
+                try {
+                    sendData(send);
+                } catch (IOException e) {
+                    log ("Unable to send data to client!");
+                    sendComplete = false;
+                    break;
+                }
+                try {
+                    reply = receiveData();
+                } catch (IOException e) {
+                    log("Didn't receive reply from client!");
+                    sendComplete = false;
+                    break;
+                }
+                if (!reply.equals("NEXT")) {
+                    sendComplete = false;
+                    break;
+                }
+            }
+        } catch (SQLException e) {
+            try {
+                sendData("UNABLE TO FETCH UPDATES");
+            } catch (IOException ex) {
+                log("Unable to send data to client!");
+            }
+        }
+        if (sendComplete) {
+            try {
+                sendData("NO MORE UPDATES");
+            } catch (IOException e) {
+                log ("Unable to send data to client!");
+            }
+        } else {
+            try {
+                sendData("SEND LAST ID");
+            } catch (IOException e) {
+                log("Unable to send data to client!");
+            }
+        }
+
+        String lastId = "-1";
+        try {
+            lastId = receiveData();
+        } catch (IOException e) {
+            log("Unable to receive last ID");
+        }
+
+        int deleteId = Integer.parseInt(lastId);
+        String deleteQuery = "DELETE FROM " + getTableName(args) + " WHERE id<=" + deleteId;
+        try {
+            dbQuery.executeUpdate(deleteQuery);
+        } catch (SQLException e) {
+            return "UNABLE TO DELETE RECORDS";
+        }
+        return "DONE";
+    }
+
+    private boolean alreadyRequested(String username, String from) {
+        String sql = "SELECT * FROM " + getTableName(username) + " WHERE from_user='" + from + "' AND type='REQUEST'";
+        ResultSet resultSet = null;
+        try {
+            resultSet = dbQuery.executeQuery(sql);
+            return getResultSize(resultSet) > 1;
+        } catch (SQLException e) {
+            return false;
+        }
     }
 
     private String getTableName(String username) {
@@ -297,7 +409,7 @@ public class ChatClientHandler implements Runnable{
         String[] credentials = args.split(",");
         String username = credentials[0];
         String key = credentials[1];
-        String sql = "SELECT * from users WHERE username='" + username + "'";
+        String sql = "SELECT * FROM users WHERE username='" + username + "'";
         ResultSet dbRes;
         try {
             dbRes = dbQuery.executeQuery(sql);
@@ -323,7 +435,7 @@ public class ChatClientHandler implements Runnable{
     }
 
     private String userExists(String args) {
-        String sql = "SELECT * from users WHERE username='" + args +"'";
+        String sql = "SELECT * FROM users WHERE username='" + args +"'";
         ResultSet dbRes;
         try {
             dbRes = dbQuery.executeQuery(sql);
@@ -358,7 +470,7 @@ public class ChatClientHandler implements Runnable{
         StringBuilder res = new StringBuilder("An unexpected error occurred!!");
 
         try {
-            String sql = "SELECT * from users WHERE username='" + args +"' or fullName='" + args + "'";
+            String sql = "SELECT * FROM users WHERE username='" + args +"' or fullName='" + args + "'";
             ResultSet dbRes = dbQuery.executeQuery(sql);
 
             res = new StringBuilder("Names -\n");
@@ -396,5 +508,43 @@ public class ChatClientHandler implements Runnable{
         } else {
             return "NO SUCH USER:" + args;
         }
+    }
+
+    private String placeConnectionRequest(String args) {
+        String[] data = args.split(",");
+        String from = user;
+        String to = data[0];
+        String requestData = data[1];
+        log ("Placing connection request to " + to + "...");
+        if (!userExists(to).equals("true"))
+            return "USER DOESN'T EXIST";
+        if (alreadyRequested(to, from))
+            return "ALREADY REQUESTED";
+        try {
+            connectionRequest(to, from, requestData);
+        } catch (SQLException e) {
+            log("SQL Error : " + e);
+            return "COULDN'T PLACE CONNECTION REQUEST";
+        }
+
+        log ("Placed connection request to " + to);
+        return "CONNECTION REQUESTED";
+    }
+
+    private String publishUpdates(String args) {
+        String[] data = args.split(",");
+        String from = user;
+        String to = data[0];
+        String requestData = data[1];
+
+        if (!userExists(to).equals("true"))
+            return "USER DOESN'T EXIST";
+        try {
+            updateRequest(to, from, requestData);
+        } catch (SQLException e) {
+            return "COULDN'T PLACE UPDATE REQUEST";
+        }
+
+        return "UPDATE SUCCESSFUL";
     }
 }

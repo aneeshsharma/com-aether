@@ -16,8 +16,8 @@ public class QUERIES {
             "last_message TEXT," +
             "last_message_date DATETIME," +
             "type VARCHAR(10)," +
-            "private_key VARCHAR())";
+            "private_key VARCHAR(32) NOT NULL)";
 
-    public static final String NEW_UPDATE_TABLE_FIELDS = "(id INT PRIMARY KEY, from VARCHAR(50) NOT NULL, type VARCHAR(10) NOT NULL, update_data TEXT NOT NULL, date_created DATETIME)";
+    public static final String NEW_UPDATE_TABLE_FIELDS = "(id INT PRIMARY KEY AUTO_INCREMENT, from_user VARCHAR(50) NOT NULL, type VARCHAR(10) NOT NULL, update_date TEXT NOT NULL, date_created DATETIME)";
     public static final String NEW_CHAT_TABLE_FIELDS = "(id INTEGER PRIMARY KEY AUTOINCREMENT, author VARCHAR(50), message TEXT, message_date DATETIME, message_status VARCHAR(10))";
 }

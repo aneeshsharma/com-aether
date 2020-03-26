@@ -22,6 +22,8 @@ public class ChatClient {
     private static String ip = "localhost";
     private static String dataDir = "/.aether-data/";
 
+    private static ChatData chatData;
+
     private static String password;
 
     private static String username, key, privateKey, publicKey;
@@ -46,6 +48,12 @@ public class ChatClient {
                 ip = "localhost";
                 System.out.println("Using localhost");
             }
+            System.out.print("(DEBUG) User: ");
+            String debug_user = stdin.readLine();
+            dataDir += debug_user + "/";
+            File f = new File(dataDir);
+            if (!f.exists())
+                f.mkdirs();
         } catch (IOException e) {
             System.out.println("Using default server");
         }
@@ -65,12 +73,20 @@ public class ChatClient {
             return;
         }
 
-        ChatData chatData;
         try {
-            chatData = new ChatData("ChatData", "chatDataTest.db", password);
+            chatData = new ChatData("ChatData", dataDir + "chatData.db", password);
         } catch (ClassNotFoundException | SQLException | KeyException | FileDecryptionError e) {
             System.out.println("Unable to retrieve chat data! Exiting...");
             return;
+        }
+
+        try {
+            String encKey = chatData.getEncryptionKey("user1");
+            System.out.println("Key:"+encKey);
+        } catch (SQLException e) {
+            e.printStackTrace();
+        } catch (NoSuchUserError noSuchUserError) {
+            noSuchUserError.printStackTrace();
         }
 
         String loginMsg = "Cannot authenticate user | Server error";
@@ -86,6 +102,8 @@ public class ChatClient {
             System.out.println(loginMsg);
             return;
         }
+
+        getUpdates();
 
         while (true) {
             String input = null;
@@ -103,17 +121,9 @@ public class ChatClient {
                 break;
 
             try {
-                try {
-                    sendData(processCommand(input));
-                } catch (InvalidCommandError e) {
-                    System.out.println("Invalid command : " + e.getMessage());
-                    continue;
-                }
-                String str = receiveData();
-                System.out.println("Message Received : " + str);
-            } catch (IOException e) {
-                System.out.println("Error sending request!");
-                break;
+                processCommand(input);
+            } catch (InvalidCommandError e) {
+                System.out.println("Invalid command : " + e.getMessage());
             }
         }
 
@@ -130,7 +140,7 @@ public class ChatClient {
         }
     }
 
-    private static String processCommand(String input) throws InvalidCommandError {
+    private static void processCommand(String input) throws InvalidCommandError {
         String request = "nothing:nothing";
 
         // remove extra whte spaces
@@ -139,14 +149,125 @@ public class ChatClient {
 
         if (input.startsWith("/command ")) {
             request = input.substring("/command ".length());
+            try {
+                sendData(request);
+            } catch (IOException e) {
+                System.out.println("Unable to contact server!");
+            }
         } else if (input.startsWith("/connect ")) {
             String name = input.substring("/connect ".length());
             if (name.equals(username))
                 throw new InvalidCommandError("Cannot connect to self");
             request = "connect:" + name;
-        }
+            String publicKeyReceived = null;
+            try {
+                sendData(request);
+                publicKeyReceived = receiveData();
+            } catch (IOException e) {
+                System.out.println("Unable to contact server!");
+            }
 
-        return request;
+            if (publicKeyReceived == null) {
+                System.out.println("Unexpected error occurred!");
+                return;
+            }
+
+            if (publicKeyReceived.startsWith("NO SUCH USER")) {
+                System.out.println("Requested user doesn't exist");
+            } else if (publicKeyReceived.startsWith("SERVER ERROR")) {
+                System.out.println("Server error!");
+            } else {
+                String chatKey = AESUtil.generateKey();
+                String cryptData;
+                try {
+                    cryptData = RSAUtil.encryptToString(chatKey, publicKeyReceived);
+                } catch (IllegalBlockSizeException | InvalidKeyException | NoSuchPaddingException | NoSuchAlgorithmException | BadPaddingException e) {
+                    e.printStackTrace();
+                    System.out.println("Unable to encrypt data!");
+                    return;
+                }
+
+                String reply = null;
+                try {
+                    sendData("connection_request:" + name + "," + cryptData);
+                    reply = receiveData();
+                } catch (IOException e) {
+                    System.out.println("Unable to contact server!");
+                    return;
+                }
+
+                if (reply.equals("CONNECTION REQUESTED")) {
+                    try {
+                        chatData.newChat(name, chatKey);
+                    } catch (SQLException e) {
+                        System.out.println("Unable to save key!");
+                    }
+                } else {
+                    System.out.println("Request unsuccessful : " + reply);
+                }
+            }
+        }
+    }
+
+    private static void getUpdates() {
+        try {
+            sendData("get_updates:" + username);
+            int lastId = -1;
+            while (true) {
+                String update = getUpdateString();
+                System.out.println("Received update : " + update);
+                if (!update.startsWith("UPDATE:")) {
+                    sendData(String.valueOf(lastId));
+                    String reply = receiveData();
+                    System.out.println("Updates retrieved : " + reply);
+                    break;
+                }
+                lastId = processUpdate(update, lastId);
+            }
+        } catch (IOException e) {
+            System.out.println("Unable to contact server!");
+        }
+    }
+
+    private static int processUpdate(String update, int last) {
+        update = update.substring("UPDATE:".length());
+        String[] args = update.split(",");
+        int id = Integer.parseInt(args[0]);
+        String from = args[1];
+        String type = args[2];
+        String update_data = args[3];
+        String date = args[4];
+        if (type.equals("REQUEST")) {
+            String chatKey = null;
+            try {
+                chatKey = RSAUtil.decrypt(update_data, RSAUtil.getPrivateKey(privateKey));
+            } catch (IllegalBlockSizeException | InvalidKeyException | BadPaddingException | NoSuchAlgorithmException | NoSuchPaddingException e) {
+                e.printStackTrace();
+            }
+            if (chatKey == null) {
+                System.out.println("Unable to decrypt request");
+                return last;
+            }
+
+            System.out.println("Received chat key : " + chatKey);
+            try {
+                chatData.newChat(from, chatKey);
+            } catch (SQLException e) {
+                System.out.println("Unable to create chat!");
+                return last;
+            }
+
+            return id;
+        }
+        return last;
+    }
+
+    private static String getUpdateString() throws IOException {
+        String data = receiveData();
+        if (!data.startsWith("UPDATE:"))
+            return data;
+        sendData("NEXT");
+        return data;
     }
 
     private static boolean fileExists(String filename) {
