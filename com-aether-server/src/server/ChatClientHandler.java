@@ -22,10 +22,10 @@ public class ChatClientHandler implements Runnable{
     private String processId;
 
     private final String JDBC_DRIVER = "org.mariadb.jdbc.Driver";
-    private final String DB_URL = "jdbc:mysql://localhost/test";
+    private final String DB_URL = "jdbc:mysql://localhost/com_aether_db";
 
-    private final String USER = "joe";
-    private final String PASS = "joemama";
+    private final String USER = "com-aether";
+    private final String PASS = "letschat";
 
     private Connection dbConn;
     private Statement dbQuery;
