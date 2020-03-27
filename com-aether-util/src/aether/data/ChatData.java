@@ -115,6 +115,20 @@ public class ChatData {
         stmt.executeUpdate(updateChatsQuery);
     }
 
+    public void addMessage(String receiverName, String message, String author, String status, String datetime) throws SQLException, NoSuchUserError {
+        if (!connectionExists(receiverName)) {
+            log("No such chat exists, creating new chat...");
+            throw new NoSuchUserError("No such user:" + receiverName);
+        }
+        String sendQuery = "INSERT INTO " + getTableName(receiverName) + " (author, message, message_date, message_status) VALUES " +
+                "('" + author + "', '" + message + "', '" + datetime + "', '" + status + "')";
+        log("Executing : " + sendQuery);
+        stmt.executeUpdate(sendQuery);
+
+        String updateChatsQuery = "UPDATE chats SET last_message='" + message + "', last_message_date=datetime('now') WHERE receiver_name='" + receiverName + "'";
+        stmt.executeUpdate(updateChatsQuery);
+    }
+
     public String getAllChats() throws SQLException {
         String getQuery = "SELECT * FROM chats";
 

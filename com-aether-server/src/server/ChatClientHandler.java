@@ -165,7 +165,7 @@ public class ChatClientHandler implements Runnable{
         }
         if (alreadyRequested(username, from))
             return;
-        String sql = "INSERT INTO " + getTableName(username) + " (from_user, type, update_date, date_created) VALUES ('" + from + "', 'REQUEST', '" + update_data + "', CURDATE())";
+        String sql = "INSERT INTO " + getTableName(username) + " (from_user, type, update_data, date_created) VALUES ('" + from + "', 'REQUEST', '" + update_data + "', CURDATE())";
         dbQuery.executeUpdate(sql);
     }
 
@@ -189,7 +189,7 @@ public class ChatClientHandler implements Runnable{
             while (resultSet.next()) {
                 String send;
                 try {
-                    send = "UPDATE:" + resultSet.getInt("id") + "," + resultSet.getString("from_user") + "," + resultSet.getString("type") + "," + resultSet.getString("update_date") + "," + resultSet.getString("update_date");
+                    send = "UPDATE:" + resultSet.getInt("id") + "," + resultSet.getString("from_user") + "," + resultSet.getString("type") + "," + resultSet.getString("update_data") + "," + resultSet.getString("date_created");
                 } catch (SQLException e) {
                     try {
                         log ("SQL Exception : " + e.getMessage());
@@ -542,6 +542,7 @@ public class ChatClientHandler implements Runnable{
         try {
             updateRequest(to, from, requestData);
         } catch (SQLException e) {
+            log("SQL Error: " + e.getMessage());
             return "COULDN'T PLACE UPDATE REQUEST";
         }
 

@@ -5,7 +5,10 @@ import java.net.*;
 import java.security.InvalidKeyException;
 import java.security.KeyException;
 import java.security.NoSuchAlgorithmException;
+import java.sql.Array;
 import java.sql.SQLException;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 
 import aether.data.ChatData;
 import aether.exceptions.*;
@@ -78,15 +81,6 @@ public class ChatClient {
         } catch (ClassNotFoundException | SQLException | KeyException | FileDecryptionError e) {
             System.out.println("Unable to retrieve chat data! Exiting...");
             return;
-        }
-
-        try {
-            String encKey = chatData.getEncryptionKey("user1");
-            System.out.println("Key:"+encKey);
-        } catch (SQLException e) {
-            e.printStackTrace();
-        } catch (NoSuchUserError noSuchUserError) {
-            noSuchUserError.printStackTrace();
         }
 
         String loginMsg = "Cannot authenticate user | Server error";
@@ -206,7 +200,64 @@ public class ChatClient {
                     System.out.println("Request unsuccessful : " + reply);
                 }
             }
+        } else if (input.startsWith("/send ")) {
+            String send_data = input.substring("/send ".length());
+            String[] args = send_data.split(":");
+            String to, message;
+            try {
+                to = args[0];
+                message = args[1];
+            } catch (ArrayIndexOutOfBoundsException e) {
+                throw new InvalidCommandError("Format - \"/send <chat_name>:<message>\"");
+            }
+            try {
+                String reply = sendMessage(to, message);
+                System.out.println(reply);
+            } catch (IOException | SQLException e) {
+                System.out.println("Unable to send message!");
+            } catch (NoSuchUserError noSuchUserError) {
+                throw new InvalidCommandError("No such user:" + to);
+            }
+        } else if (input.equals("/update")) {
+            getUpdates();
+        } else if (input.startsWith("/get_messages ")) {
+            getUpdates();
+            String query = input.substring("/get_messages ".length());
+            String[] data = query.split(" ");
+            String from;
+            int n;
+            try {
+                from = data[0];
+            } catch (ArrayIndexOutOfBoundsException e) {
+                throw new InvalidCommandError("Format - \"/get_messages <chat_name> <number_of_messages>\"");
+            }
+
+            try {
+                n = Integer.parseInt(data[1]);
+            } catch (ArrayIndexOutOfBoundsException e) {
+                n = 10;
+            }
+            try {
+                String messages = chatData.getLastNMessages(from, n);
+                System.out.println(messages);
+            } catch (SQLException e) {
+                System.out.println("Unable to fetch messages!");
+            }
         }
+    }
+
+    private static String sendMessage(String to, String message) throws SQLException, NoSuchUserError, IOException {
+        String chatKey = chatData.getEncryptionKey(to);
+        DateTimeFormatter dtf = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+        LocalDateTime now = LocalDateTime.now();
+        String updateData = "message:" + username + "," + message + "," + dtf.format(now);
+        String encryptedData = AESUtil.encrypt(updateData, chatKey);
+        String request = "update:" + to + "," + encryptedData;
+        sendData(request);
+        String reply = receiveData();
+        if (reply.equals("UPDATE SUCCESSFUL"))
+            chatData.addMessage(to, message, username, "SENT", dtf.format(now));
+        return reply;
     }
 
     private static void getUpdates() {
@@ -257,6 +308,40 @@ public class ChatClient {
                 return last;
             }
 
+            return id;
+        } else if (type.equals("UPDATE")) {
+            String chatKey = null;
+            try {
+                 chatKey = chatData.getEncryptionKey(from);
+            } catch (SQLException e) {
+                System.out.println("Error occurred getting encryption key!");
+            } catch (NoSuchUserError e) {
+                System.out.println("No connection to given user!");
+            }
+
+            if (chatKey == null)
+                return last;
+
+            String updateQuery = AESUtil.decrypt(update_data, chatKey);
+            if (updateQuery == null) {
+                System.out.println("Received data can't be decrypted!");
+                return last;
+            }
+            if (updateQuery.startsWith("message:")) {
+                String[] updateArgs = updateQuery.substring("message:".length()).split(",");
+                String messageAuthor = updateArgs[0];
+                String message = updateArgs[1];
+                String messageDate = updateArgs[2];
+                try {
+                    chatData.addMessage(from, message, messageAuthor, "RECEIVED", messageDate);
+                } catch (SQLException e) {
+                    System.out.println("Unable to store messages!");
+                    return last;
+                } catch (NoSuchUserError noSuchUserError) {
+                    System.out.println("This is never gonna happen. But if it does, congratulations! You have entered a new reality.");
+                    return last;
+                }
+            }
             return id;
         }
         return last;
