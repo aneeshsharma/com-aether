@@ -5,14 +5,14 @@ Com-Aether is an end to end messaging app for secure messaging without any track
 ### First release now available
 
 ## Sections in this guide
-1. [Setting up a server](#Setting up a server)
-2. [Using the client](#Using the client)
-3. [Commands list](#Commands)
+1. [Setting up a server](#server)
+2. [Using the client](#client)
+3. [Commands list](#commands)
 
 ## How to use it?
 To start using com-aether, you first need to setup a chat server as there is no default chat server yet (the default chat server that the app uses is 'localhost' and is for testing purpose only).
 
-### Setting up a server
+### <a name="server"></a>Setting up a server
 Hosting the server is easy. First of all make sure you have `mysql` installed. To install mysql-
 1. Debian based systems : ```sudo apt install mysql-server```
 
@@ -42,7 +42,7 @@ This should now run the server on Port 7200. The server app will manage the rest
 
 The server is not very configurable as of now. I plan to add a configuration file in the future inorder to make the server setup even simpler.
 
-### Using the client
+### <a name="client"></a>Using the client
 Once the server is up and running. We can start using the client to chat!
 
 The client is a simple command line application. To run the client, download the latest client app, navigate to the directory and then -
@@ -57,7 +57,7 @@ The rest of the registration is fairly straightforward.
 
 After you have logged in, you are presented with a simple prompt as `>>> <command>`. You can now interact with the app using commands.
 
-### Commands
+### <a name="commands"></a>Commands
 Different commands have been created in Com-Aether to efficiently interact with the app using your keyboard. Its faster than GUI.
 
 The different commands are -
