@@ -15,7 +15,7 @@ To start using com-aether, you first need to setup a chat server as there is no 
 > Java 13 has been used to build the client as well as the server. Make sure you have the same version when running the applications
 
 ### <a name="server"></a>Setting up a server
-Hosting the server is easy. First of all make sure you have `mysql` installed. To install mysql-
+Hosting the server is easy. First of all make sure you have MySQL installed. To install MySQL-
 1. Debian based systems : ```sudo apt install mysql-server```
 
 Once that is done make sure you create a new user for the server app. For now the server app uses the default credentials on MySQL as -
