@@ -12,7 +12,7 @@ Com-Aether is an end to end messaging app for secure messaging without any track
 ## How to use it?
 To start using com-aether, you first need to setup a chat server as there is no default chat server yet (the default chat server that the app uses is 'localhost' and is for testing purpose only).
 
-> Java 13 has been used to build the client as well as the server. Make sure you have the same version when running the applications
+> Java 11 has been used to build the client as well as the server. Make sure you have the same version when running the applications
 
 ### <a name="server"></a>Setting up a server
 Hosting the server is easy. First of all make sure you have MySQL installed. To install MySQL-
